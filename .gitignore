@@ -18,3 +18,5 @@ wandb
 CLAUDE.md
 .claude/
 .vscode/
+
+*.db

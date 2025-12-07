@@ -21,36 +21,76 @@ def get_token():
         sys.exit(1)
     return token
 
-def fetch_issues(token, repos):
+def estimate_difficulty(title, labels):
+    title_lower = title.lower()
+    label_names = [l['name'].lower() for l in labels]
+    
+    # Easy signals
+    easy_keywords = ['typo', 'doc', 'readme', 'comment', 'rename', 'fix link']
+    easy_labels = ['good first issue', 'documentation', 'easy', 'help wanted', 'good-first-issue']
+    
+    if any(k in title_lower for k in easy_keywords) or any(l in label_names for l in easy_labels):
+        return "Easy"
+        
+    # Hard signals
+    hard_keywords = ['rewrite', 'refactor', 'architect', 'performance', 'memory', 'leak', 'security', 'c++']
+    hard_labels = ['enhancement', 'feature', 'refactor', 'performance', 'security', 'complex']
+    
+    if any(k in title_lower for k in hard_keywords) or any(l in label_names for l in hard_labels):
+        return "Hard"
+        
+    return "Medium"
+
+import sqlite3
+
+# ... (imports remain)
+
+def init_db(db_path):
+    conn = sqlite3.connect(db_path)
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS issues (
+            id TEXT PRIMARY KEY,
+            repo TEXT,
+            weight REAL,
+            title TEXT,
+            number INTEGER,
+            url TEXT,
+            age INTEGER,
+            created_at TEXT,
+            author TEXT,
+            labels TEXT,
+            difficulty TEXT
+        )
+    ''')
+    conn.commit()
+    return conn
+
+def fetch_issues(token, repos, db_conn):
     url = "https://api.github.com/graphql"
     headers = {"Authorization": f"Bearer {token}"}
     
-    # Calculate cutoff date (45 days ago)
-    cutoff_date = datetime.now(timezone.utc) - timedelta(days=45)
-    cutoff_iso = cutoff_date.isoformat()
+    print("Fetching ALL open issues (no age limit)...")
     
-    print(f"Fetching issues created before {cutoff_iso}...")
-    
-    all_issues = []
-    
-    # Process in batches to avoid query complexity limits
     batch_size = 10
     repo_names = list(repos.keys())
+    total_fetched = 0
+    
+    cursor = db_conn.cursor()
     
     for i in range(0, len(repo_names), batch_size):
         batch = repo_names[i:i+batch_size]
         print(f"Processing batch {i//batch_size + 1}/{len(repo_names)//batch_size + 1}...")
         
-        # Construct dynamic query alias for each repo
         query_parts = []
         for idx, repo_full_name in enumerate(batch):
             owner, name = repo_full_name.split('/')
-            # GraphQL alias must be alphanumeric
             alias = f"repo_{idx}"
+            # Ordered by Created At ASC to get oldest issues first
             query_parts.append(f"""
             {alias}: repository(owner: "{owner}", name: "{name}") {{
                 nameWithOwner
-                issues(states: OPEN, first: 20, orderBy: {{field: CREATED_AT, direction: ASC}}) {{
+                issues(states: OPEN, first: 50, orderBy: {{field: CREATED_AT, direction: ASC}}) {{
                     nodes {{
                         title
                         number
@@ -58,6 +98,11 @@ def fetch_issues(token, repos):
                         createdAt
                         author {{
                             login
+                        }}
+                        labels(first: 5) {{
+                            nodes {{
+                                name
+                            }}
                         }}
                     }}
                 }}
@@ -92,55 +137,54 @@ def fetch_issues(token, repos):
                 
                 for issue in issues:
                     created_at = datetime.fromisoformat(issue['createdAt'].rstrip('Z')).replace(tzinfo=timezone.utc)
-                    
-                    # Double check age (though we sorted by ASC, we only took first 20)
                     age_days = (datetime.now(timezone.utc) - created_at).days
                     
-                    if age_days >= 45:
-                        all_issues.append({
-                            "repo": repo_full_name,
-                            "weight": weight,
-                            "title": issue['title'],
-                            "number": issue['number'],
-                            "url": issue['url'],
-                            "age": age_days,
-                            "created_at": issue['createdAt'],
-                            "author": issue['author']['login'] if issue.get('author') else "Unknown"
-                        })
+                    labels_data = issue.get('labels', {}).get('nodes', [])
+                    difficulty = estimate_difficulty(issue['title'], labels_data)
+                    labels_json = json.dumps([l['name'] for l in labels_data])
+                    
+                    # Use URL as unique ID or repo+number
+                    issue_id = f"{repo_full_name}#{issue['number']}"
+                    
+                    cursor.execute('''
+                        INSERT OR REPLACE INTO issues 
+                        (id, repo, weight, title, number, url, age, created_at, author, labels, difficulty)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        issue_id, repo_full_name, weight, issue['title'], issue['number'], 
+                        issue['url'], age_days, issue['createdAt'], 
+                        issue['author']['login'] if issue.get('author') else "Unknown",
+                        labels_json, difficulty
+                    ))
+                    total_fetched += 1
+            
+            db_conn.commit()
                         
         except Exception as e:
             print(f"Exception fetching batch: {e}")
             
-        time.sleep(1) # Rate limit niceness
+        time.sleep(1) 
 
-    return all_issues
+    return total_fetched
 
 def main():
     token = get_token()
     print("Loading master repositories...")
     all_repos = load_master_repo_weights()
     
-    # Filter for active and high weight repos (> 1.0 weight) to save time/API calls
-    # Or just top 50 by weight
     active_repos = {k: v for k, v in all_repos.items() if v.get('inactiveAt') is None}
     sorted_repos = sorted(active_repos.items(), key=lambda x: x[1]['weight'], reverse=True)
-    top_repos = dict(sorted_repos[:50]) # Top 50 repos
+    top_repos = dict(sorted_repos[:50]) 
     
-    print(f"Scanning top {len(top_repos)} repositories for aged issues...")
+    print(f"Scanning top {len(top_repos)} repositories...")
     
-    issues = fetch_issues(token, top_repos)
+    db_path = os.path.join(os.path.dirname(__file__), '../dashboard/opportunities.db')
+    conn = init_db(db_path)
     
-    # Sort by weight desc, then age desc
-    issues.sort(key=lambda x: (x['weight'], x['age']), reverse=True)
-    
-    output_dir = os.path.join(os.path.dirname(__file__), '../dashboard')
-    os.makedirs(output_dir, exist_ok=True)
-    
-    output_file = os.path.join(output_dir, 'data.json')
-    with open(output_file, 'w') as f:
-        json.dump({"updated_at": datetime.now().isoformat(), "issues": issues}, f, indent=2)
+    count = fetch_issues(token, top_repos, conn)
+    conn.close()
         
-    print(f"Found {len(issues)} aged issues. Saved to {output_file}")
+    print(f"Sync complete. {count} issues stored in {db_path}")
 
 if __name__ == "__main__":
     main()

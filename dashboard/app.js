@@ -1,31 +1,58 @@
 document.addEventListener('DOMContentLoaded', () => {
-    let allIssues = [];
-
-    fetch('data.json')
-        .then(response => response.json())
-        .then(data => {
-            allIssues = data.issues;
-            document.getElementById('last-updated').textContent = new Date(data.updated_at).toLocaleString();
-            document.getElementById('total-issues').textContent = allIssues.length;
-
-            if (allIssues.length > 0) {
-                const maxWeight = Math.max(...allIssues.map(i => i.weight));
-                document.getElementById('top-weight').textContent = maxWeight.toFixed(2);
-            }
-
-            renderTable(allIssues);
-        })
-        .catch(err => console.error('Error loading data:', err));
-
     const searchInput = document.getElementById('search');
-    searchInput.addEventListener('input', (e) => {
-        const term = e.target.value.toLowerCase();
-        const filtered = allIssues.filter(issue =>
-            issue.repo.toLowerCase().includes(term) ||
-            issue.title.toLowerCase().includes(term)
-        );
-        renderTable(filtered);
-    });
+    const minAgeInput = document.getElementById('min-age');
+    const maxAgeInput = document.getElementById('max-age');
+    let currentSort = 'weight';
+    let debounceTimer;
+
+    function fetchIssues() {
+        // Show loading state if needed
+        const tbody = document.getElementById('issues-body');
+        tbody.style.opacity = '0.5';
+
+        const params = new URLSearchParams({
+            search: searchInput.value,
+            min_age: minAgeInput.value || 0,
+            max_age: maxAgeInput.value || 99999,
+            sort: currentSort
+        });
+
+        fetch(`/api/issues?${params}`)
+            .then(response => response.json())
+            .then(data => {
+                const issues = data.issues;
+                document.getElementById('total-issues').textContent = data.count;
+                document.getElementById('last-updated').textContent = 'Live'; // Or api could return DB time
+
+                if (issues.length > 0) {
+                    const maxWeight = Math.max(...issues.map(i => i.weight));
+                    document.getElementById('top-weight').textContent = maxWeight.toFixed(2);
+
+                    const easyCount = issues.filter(i => i.difficulty === 'Easy').length;
+                    document.getElementById('easy-issues').textContent = easyCount;
+                } else {
+                    document.getElementById('top-weight').textContent = '0';
+                    document.getElementById('easy-issues').textContent = '0';
+                }
+
+                renderTable(issues);
+                tbody.style.opacity = '1';
+            })
+            .catch(err => {
+                console.error('Error loading data:', err);
+                tbody.style.opacity = '1';
+            });
+    }
+
+    // Debounce function to prevent API spam
+    function debounceFetch() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(fetchIssues, 300);
+    }
+
+    searchInput.addEventListener('input', debounceFetch);
+    minAgeInput.addEventListener('input', debounceFetch);
+    maxAgeInput.addEventListener('input', debounceFetch);
 
     const filterBtns = document.querySelectorAll('.filter-btn');
     filterBtns.forEach(btn => {
@@ -33,18 +60,13 @@ document.addEventListener('DOMContentLoaded', () => {
             filterBtns.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
 
-            const sortType = btn.dataset.sort;
-            let sorted = [...allIssues];
-
-            if (sortType === 'weight') {
-                sorted.sort((a, b) => b.weight - a.weight);
-            } else if (sortType === 'age') {
-                sorted.sort((a, b) => b.age - a.age);
-            }
-
-            renderTable(sorted);
+            currentSort = btn.dataset.sort;
+            fetchIssues();
         });
     });
+
+    // Initial load
+    fetchIssues();
 });
 
 function renderTable(issues) {
@@ -58,6 +80,8 @@ function renderTable(issues) {
         // This is a rough estimate assuming 100 lines of Python
         const potentialScore = (175 * issue.weight * 3.7 * 2.0).toLocaleString(undefined, { maximumFractionDigits: 0 });
 
+        const diffClass = `badge-${(issue.difficulty || 'Medium').toLowerCase()}`;
+
         tr.innerHTML = `
             <td><div class="repo-name">${issue.repo}</div></td>
             <td><span class="weight-badge">${issue.weight.toFixed(2)}</span></td>
@@ -65,6 +89,7 @@ function renderTable(issues) {
                 <a href="${issue.url}" target="_blank" class="issue-link">#${issue.number}: ${issue.title}</a>
                 <div style="font-size: 0.8rem; color: #666; margin-top: 4px;">by ${issue.author}</div>
             </td>
+             <td><span class="${diffClass}">${issue.difficulty || 'Medium'}</span></td>
             <td><span class="age-tag">${issue.age} days</span></td>
             <td><span class="score-est">~${potentialScore}</span></td>
             <td><a href="${issue.url}" target="_blank" class="action-btn">View</a></td>

@@ -88,6 +88,23 @@ h1 {
     font-size: 0.9rem;
 }
 
+.range-filter {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-secondary);
+}
+
+.range-input {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    padding: 0.75rem;
+    border-radius: 6px;
+    width: 100px;
+    font-size: 0.9rem;
+}
+
 .filters {
     display: flex;
     gap: 1rem;
@@ -103,7 +120,8 @@ h1 {
     transition: all 0.2s;
 }
 
-.filter-btn.active, .filter-btn:hover {
+.filter-btn.active,
+.filter-btn:hover {
     background: var(--accent);
     color: white;
     border-color: var(--accent);
@@ -193,4 +211,31 @@ tr:hover {
 
 .action-btn:hover {
     background: var(--accent-hover);
+}
+
+.badge-easy {
+    background: rgba(16, 185, 129, 0.1);
+    color: var(--success);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge-medium {
+    background: rgba(245, 158, 11, 0.1);
+    color: var(--warning);
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.badge-hard {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
 }

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -9,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
+
 <body>
     <div class="container">
         <header>
@@ -25,6 +27,10 @@
                     <span class="stat-value" id="top-weight">0</span>
                 </div>
                 <div class="stat-card">
+                    <span class="stat-label">Easy Issues</span>
+                    <span class="stat-value" id="easy-issues">0</span>
+                </div>
+                <div class="stat-card">
                     <span class="stat-label">Last Updated</span>
                     <span class="stat-value" id="last-updated">-</span>
                 </div>
@@ -34,9 +40,17 @@
         <main>
             <div class="controls">
                 <input type="text" id="search" placeholder="Search repositories or issues..." class="search-bar">
+
+                <div class="range-filter">
+                    <input type="number" id="min-age" placeholder="Min Days" class="range-input">
+                    <span>-</span>
+                    <input type="number" id="max-age" placeholder="Max Days" class="range-input">
+                </div>
+
                 <div class="filters">
                     <button class="filter-btn active" data-sort="weight">Sort by Weight</button>
                     <button class="filter-btn" data-sort="age">Sort by Age</button>
+                    <button class="filter-btn" data-sort="difficulty">Sort by Difficulty</button>
                 </div>
             </div>
 
@@ -47,6 +61,7 @@
                             <th>Repository</th>
                             <th>Weight</th>
                             <th>Issue</th>
+                            <th>Difficulty</th>
                             <th>Age</th>
                             <th>Potential Score</th>
                             <th>Action</th>
@@ -61,4 +76,5 @@
     </div>
     <script src="app.js"></script>
 </body>
+
 </html>
