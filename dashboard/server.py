@@ -69,6 +69,48 @@ def get_issues():
         "count": len(issues)
     })
 
+@app.route('/competitors')
+def competitors():
+    return send_from_directory('.', 'competitors.html')
+
+@app.route('/competitors.js')
+def competitors_script():
+    return send_from_directory('.', 'competitors.js')
+
+@app.route('/api/prs')
+def get_prs():
+    search = request.args.get('search', default='', type=str).lower()
+    sort_by = request.args.get('sort', default='updated', type=str)
+
+    query = "SELECT * FROM prs WHERE 1=1"
+    params = []
+
+    if search:
+        query += " AND (lower(repo) LIKE ? OR lower(author) LIKE ? OR lower(title) LIKE ?)"
+        params.extend([f'%{search}%', f'%{search}%', f'%{search}%'])
+
+    if sort_by == 'age':
+        query += " ORDER BY age DESC"
+    elif sort_by == 'author':
+        query += " ORDER BY author ASC"
+    elif sort_by == 'score':
+        query += " ORDER BY estimated_score DESC"
+    else:  # Default: updated (most recent first)
+        query += " ORDER BY updated_at DESC"
+
+    conn = get_db_connection()
+    try:
+        prs = conn.execute(query, params).fetchall()
+    except sqlite3.OperationalError:
+        # Table doesn't exist yet
+        prs = []
+    conn.close()
+
+    return jsonify({
+        "prs": [dict(p) for p in prs],
+        "count": len(prs)
+    })
+
 if __name__ == '__main__':
     print("Starting server on http://localhost:8000")
     app.run(port=8000, debug=True)

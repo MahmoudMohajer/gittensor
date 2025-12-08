@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gittensor Competitors</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <h1>Gittensor <span class="highlight">Competitors</span></h1>
+            </div>
+            <nav class="nav-links">
+                <a href="/" class="nav-link">Opportunities</a>
+                <a href="/competitors" class="nav-link active">Competitors</a>
+            </nav>
+        </header>
+
+        <div class="stats">
+            <div class="stat-card">
+                <span class="stat-label">Open PRs</span>
+                <span class="stat-value" id="total-prs">0</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Unique Authors</span>
+                <span class="stat-value" id="unique-authors">0</span>
+            </div>
+            <div class="stat-card">
+                <span class="stat-label">Top Competitor</span>
+                <span class="stat-value" id="top-competitor">-</span>
+            </div>
+        </div>
+
+        <main>
+            <div class="controls">
+                <input type="text" id="search" placeholder="Search repos or authors..." class="search-bar">
+                <div class="filters">
+                    <button class="filter-btn" data-sort="score">Sort by Score</button>
+                    <button class="filter-btn active" data-sort="updated">Sort by Recent</button>
+                    <button class="filter-btn" data-sort="age">Sort by Age</button>
+                    <button class="filter-btn" data-sort="author">Sort by Author</button>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Repository</th>
+                            <th>Author</th>
+                            <th>Pull Request</th>
+                            <th>Changes</th>
+                            <th>Est. Score</th>
+                            <th>Age</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="prs-body">
+                        <!-- PRs will be injected here -->
+                    </tbody>
+                </table>
+            </div>
+        </main>
+    </div>
+    <script src="competitors.js"></script>
+</body>
+
+</html>
