@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Fetch open PRs containing the Gittensor tagline to track competitors.
-Uses GitHub Search API and calculates estimated scores.
+Uses GitHub Search API and calculates estimated scores using the real validator logic.
 """
 import os
 import sys
@@ -12,6 +12,16 @@ import time
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 
+# Add project root to path to import gittensor modules
+# Assumes this script is in /dashboard/ and gittensor package is in /gittensor/
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(current_dir)
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
+from gittensor.classes import PullRequest, FileChange
+from gittensor.validator.utils.load_weights import load_programming_language_weights, load_master_repo_weights
+
 load_dotenv()
 
 def get_token():
@@ -20,29 +30,6 @@ def get_token():
         print("Error: GITTENSOR_MINER_PAT environment variable not set")
         sys.exit(1)
     return token
-
-def load_weights():
-    """Load language and repo weights from the validator files."""
-    script_dir = os.path.dirname(__file__)
-    
-    # Language weights
-    lang_path = os.path.join(script_dir, '../gittensor/validator/weights/programming_languages.json')
-    try:
-        with open(lang_path, 'r') as f:
-            lang_weights = json.load(f)
-    except:
-        lang_weights = {}
-    
-    # Repo weights
-    repo_path = os.path.join(script_dir, '../gittensor/validator/weights/master_repositories.json')
-    try:
-        with open(repo_path, 'r') as f:
-            repo_data = json.load(f)
-            repo_weights = {r['repo']: r.get('weight', 1.0) for r in repo_data}
-    except:
-        repo_weights = {}
-    
-    return lang_weights, repo_weights
 
 def get_pr_files(token, repo, pr_number):
     """Fetch file changes for a specific PR."""
@@ -59,55 +46,6 @@ def get_pr_files(token, repo, pr_number):
     except:
         pass
     return []
-
-def calculate_pr_score(files, repo, lang_weights, repo_weights):
-    """
-    Calculate estimated score for a PR based on file changes.
-    Uses the same logic as the validator.
-    """
-    # Constants from gittensor/constants.py
-    DEFAULT_LANG_WEIGHT = 0.12
-    TEST_FILE_WEIGHT = 0.10
-    MITIGATED_EXTENSIONS = ["md", "txt", "json"]
-    MAX_LINES_MITIGATED = 300
-    TAGLINE_BOOST = 2.0
-    GITTENSOR_REPO = "entrius/gittensor"
-    
-    base_score = 0.0
-    
-    for f in files:
-        filename = f.get('filename', '').lower()
-        additions = f.get('additions', 0)
-        
-        # Get file extension
-        ext = os.path.splitext(filename)[1].lstrip('.')
-        
-        # Get language weight (default 0.12 for unknown extensions)
-        lang_weight = lang_weights.get(ext, DEFAULT_LANG_WEIGHT)
-        
-        # Apply mitigated extension cap (md, txt, json capped at 300 lines)
-        if ext in MITIGATED_EXTENSIONS:
-            additions = min(additions, MAX_LINES_MITIGATED)
-        
-        # Check if it's a test file (reduced weight)
-        is_test_file = 'test' in filename or 'spec' in filename or filename.startswith('test_')
-        file_weight = TEST_FILE_WEIGHT if is_test_file else 1.0
-        
-        # Score: additions * language_weight * file_weight
-        file_score = additions * lang_weight * file_weight
-        base_score += file_score
-    
-    # Apply repo weight (default 1.0 for non-incentivized repos)
-    repo_weight = repo_weights.get(repo, 1.0)
-    
-    # Apply tagline multiplier (2.0) for non-gittensor repos
-    # PRs on gittensor repo itself don't get the bonus
-    tagline_multiplier = TAGLINE_BOOST if repo.lower() != GITTENSOR_REPO.lower() else 1.0
-    
-    # Final estimated score
-    estimated_score = base_score * repo_weight * tagline_multiplier
-    
-    return round(estimated_score, 2)
 
 def init_db(db_path):
     conn = sqlite3.connect(db_path)
@@ -157,6 +95,9 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
     total_fetched = 0
     page = 1
     
+    TAGLINE_BOOST = 2.0
+    GITTENSOR_REPO = "entrius/gittensor"
+
     while True:
         params["page"] = page
         
@@ -194,14 +135,54 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
                 pr_id = f"{repo}#{pr_number}"
                 
                 # Fetch file changes for this PR
-                files = get_pr_files(token, repo, pr_number)
-                additions = sum(f.get('additions', 0) for f in files)
-                deletions = sum(f.get('deletions', 0) for f in files)
+                raw_files = get_pr_files(token, repo, pr_number)
                 
-                # Calculate estimated score
-                estimated_score = calculate_pr_score(files, repo, lang_weights, repo_weights)
+                # Convert to FileChange objects
+                file_changes = []
+                for rf in raw_files:
+                    try:
+                        file_changes.append(FileChange.from_github_response(pr_number, repo, rf))
+                    except Exception as e:
+                        print(f"Error parsing file change: {e}")
+
+                additions = sum(f.additions for f in file_changes)
+                deletions = sum(f.deletions for f in file_changes)
                 
-                print(f"  {pr_id}: +{additions}/-{deletions} -> ~{estimated_score} pts")
+                # Construct PullRequest object for scoring
+                # Use dummy values for fields we don't need for scoring calculation or don't have
+                pr = PullRequest(
+                    number=pr_number,
+                    repository_full_name=repo,
+                    uid=0,
+                    hotkey="none",
+                    github_id="none",
+                    title=item['title'],
+                    author_login=item['user']['login'] if item.get('user') else 'Unknown',
+                    merged_at=datetime.now(timezone.utc), # Dummy, not used in score calc logic for open PRs usually
+                    created_at=created_dt,
+                    file_changes=file_changes
+                )
+
+                # 1. Calculate Base Score
+                pr.base_score = pr.calculate_score_from_file_changes(lang_weights)
+
+                # 2. Apply Multipliers
+                # Repo weight
+                r_weight = 1.0
+                if repo in repo_weights:
+                    r_weight = repo_weights[repo].get('weight', 1.0)
+                
+                # Tagline multiplier
+                tagline_multiplier = TAGLINE_BOOST if repo.lower() != GITTENSOR_REPO.lower() else 1.0
+                
+                pr.repo_weight_multiplier = r_weight
+                pr.gittensor_tag_multiplier = tagline_multiplier
+                # Other multipliers remain default (1.0) for estimation
+                
+                # 3. Calculate Final Score
+                estimated_score = pr.calculate_final_earned_score()
+                
+                print(f"  {pr_id}: +{additions}/-{deletions} -> ~{estimated_score:.2f} pts")
                 
                 cursor.execute('''
                     INSERT OR REPLACE INTO prs 
@@ -210,8 +191,8 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
                 ''', (
                     pr_id,
                     repo,
-                    item['user']['login'] if item.get('user') else 'Unknown',
-                    item['title'],
+                    pr.author_login,
+                    pr.title,
                     pr_number,
                     item['html_url'],
                     item['created_at'],
@@ -236,6 +217,8 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
             
         except Exception as e:
             print(f"Error fetching PRs: {e}")
+            import traceback
+            traceback.print_exc()
             break
     
     return total_fetched
@@ -244,7 +227,8 @@ def main():
     token = get_token()
     
     print("Loading weights...")
-    lang_weights, repo_weights = load_weights()
+    lang_weights = load_programming_language_weights()
+    repo_weights = load_master_repo_weights()
     
     db_path = os.path.join(os.path.dirname(__file__), '../dashboard/opportunities.db')
     conn = init_db(db_path)
