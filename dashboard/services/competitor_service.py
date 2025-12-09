@@ -15,6 +15,8 @@ if project_root not in sys.path:
 
 from gittensor.classes import PullRequest, FileChange
 
+SCORING_API_URL = os.getenv("SCORING_API_URL", "http://localhost:5100/score-pr")
+
 def get_pr_files(token, repo, pr_number):
     """Fetch file changes for a specific PR."""
     url = f"https://api.github.com/repos/{repo}/pulls/{pr_number}/files"
@@ -130,23 +132,34 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
                     file_changes=file_changes
                 )
 
-                # 1. Calculate Base Score
-                pr.base_score = pr.calculate_score_from_file_changes(lang_weights)
+                # Calculate score via validator scoring API for consistency
+                estimated_score = pr.base_score = pr.repo_weight_multiplier = pr.gittensor_tag_multiplier = 0.0
+                try:
+                    api_resp = requests.post(
+                        SCORING_API_URL,
+                        json={
+                            "repo_full_name": repo,
+                            "pr_number": pr_number,
+                            "github_token": token,
+                            "total_open_prs": 0,
+                        },
+                        timeout=20,
+                    )
+                    if api_resp.status_code == 200:
+                        api_json = api_resp.json()
+                        pr_data = api_json.get("pr", {})
+                        score_data = api_json.get("score", {})
 
-                # 2. Apply Multipliers
-                # Repo weight
-                r_weight = 1.0
-                if repo in repo_weights:
-                    r_weight = repo_weights[repo].get('weight', 1.0)
-                
-                # Tagline multiplier
-                tagline_multiplier = TAGLINE_BOOST if repo.lower() != GITTENSOR_REPO.lower() else 1.0
-                
-                pr.repo_weight_multiplier = r_weight
-                pr.gittensor_tag_multiplier = tagline_multiplier
-                
-                # 3. Calculate Final Score
-                estimated_score = pr.calculate_final_earned_score()
+                        pr.base_score = pr_data.get("base_score", 0.0)
+                        pr.repo_weight_multiplier = pr_data.get("multipliers", {}).get("repo_weight_multiplier", 1.0)
+                        pr.gittensor_tag_multiplier = pr_data.get("multipliers", {}).get("gittensor_tag_multiplier", 1.0)
+                        estimated_score = score_data.get("earned", pr.calculate_final_earned_score())
+                    else:
+                        print(f"Scoring API error {api_resp.status_code}: {api_resp.text}")
+                        estimated_score = pr.calculate_final_earned_score()
+                except Exception as e:
+                    print(f"Scoring API call failed: {e}")
+                    estimated_score = pr.calculate_final_earned_score()
                 
                 print(f"  {pr_id}: +{additions}/-{deletions} -> ~{estimated_score:.2f} pts")
                 
