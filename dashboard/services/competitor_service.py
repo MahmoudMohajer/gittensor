@@ -42,7 +42,7 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
         "Accept": "application/vnd.github.v3+json"
     }
     
-    query = '"Contribution by Gittensor" is:pr is:open'
+    query = '"Contribution by Gittensor" is:pr is:open is:unmerged'
     
     params = {
         "q": query,
@@ -51,9 +51,15 @@ def fetch_gittensor_prs(token, db_conn, lang_weights, repo_weights):
         "per_page": 100
     }
     
-    print(f"Searching for PRs with Gittensor tagline...")
     
     cursor = db_conn.cursor()
+    # Flush existing data to remove stale/closed PRs
+    print("Flushing existing PR data...")
+    cursor.execute('DELETE FROM prs')
+    db_conn.commit()
+
+    print(f"Searching for PRs with Gittensor tagline...")
+    
     total_fetched = 0
     page = 1
     
