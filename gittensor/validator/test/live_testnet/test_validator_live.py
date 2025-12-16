@@ -53,13 +53,41 @@ import numpy as np
 import uvicorn
 from fastapi import Body, Depends, FastAPI, Header, HTTPException
 
-from gittensor.validator.utils.load_weights import load_master_repo_weights, load_programming_language_weights
+from gittensor.validator.utils.load_weights import (
+    load_master_repo_weights,
+    load_programming_language_weights,
+)
 
 if TYPE_CHECKING:
     from neurons.base.validator import BaseValidatorNeuron
 
 from gittensor.utils.uids import get_all_uids
 from gittensor.validator.evaluation.reward import get_rewards
+
+
+def _is_testnet(chain_endpoint: str) -> bool:
+    """
+    Determine if running on testnet based on chain endpoint.
+
+    Args:
+        chain_endpoint: The chain endpoint URL from validator config
+
+    Returns:
+        True if running on testnet, False otherwise
+    """
+    if not chain_endpoint:
+        return False
+
+    chain_lower = str(chain_endpoint).lower()
+    testnet_indicators = [
+        "test",
+        "testnet",
+        "test.finney.opentensor.ai",
+        "localhost",
+        "127.0.0.1",
+    ]
+
+    return any(indicator in chain_lower for indicator in testnet_indicators)
 
 
 def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
@@ -82,11 +110,15 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
         """Verify the API key provided in the X-API-Key header."""
         if not REQUIRED_API_KEY:
             bt.logging.error("VALIDATOR_DEBUG_API_KEY not set in environment!")
-            raise HTTPException(status_code=500, detail="API key not configured on server")
+            raise HTTPException(
+                status_code=500, detail="API key not configured on server"
+            )
 
         if not x_api_key:
             bt.logging.warning("API request rejected: No API key provided")
-            raise HTTPException(status_code=401, detail="Missing API key. Provide X-API-Key header.")
+            raise HTTPException(
+                status_code=401, detail="Missing API key. Provide X-API-Key header."
+            )
 
         if x_api_key != REQUIRED_API_KEY:
             bt.logging.warning("API request rejected: Invalid API key")
@@ -94,21 +126,27 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
 
         return True
 
-    @app.get('/health')
+    @app.get("/health")
     async def health(authorized: bool = Depends(verify_api_key)):
         """Health check endpoint (requires API key)."""
         return {
             "status": "healthy",
             "validator_uid": int(validator.uid) if validator.uid is not None else None,
             "network": (
-                str(validator.config.subtensor.chain_endpoint) if hasattr(validator.config, 'subtensor') else "unknown"
+                str(validator.config.subtensor.chain_endpoint)
+                if hasattr(validator.config, "subtensor")
+                else "unknown"
             ),
-            "netuid": int(validator.config.netuid) if hasattr(validator.config, 'netuid') else None,
+            "netuid": int(validator.config.netuid)
+            if hasattr(validator.config, "netuid")
+            else None,
         }
 
-    @app.post('/trigger_scoring')
+    @app.post("/trigger_scoring")
     async def trigger_scoring(
-        uids: Optional[List[int]] = Body(None, description="Optional list of UIDs to score"),
+        uids: Optional[List[int]] = Body(
+            None, description="Optional list of UIDs to score"
+        ),
         authorized: bool = Depends(verify_api_key),
     ):
         """
@@ -123,17 +161,27 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
         try:
             # Check if running on testnet
             chain_endpoint = validator.config.subtensor.chain_endpoint
-            # TODO: Make this a sufficient is testnet check, below one doesn't seem to be working.
-            # is_testnet = "test" in chain_endpoint.lower() or chain_endpoint == "wss://test.finney.opentensor.ai:443/"
-            is_testnet = True
+            is_testnet = _is_testnet(chain_endpoint)
 
-            if not is_testnet:
-                bt.logging.error(f"Remote debugging endpoint blocked: Not running on testnet (chain: {chain_endpoint})")
+            # Check for explicit override to allow debugging on mainnet (for emergency cases)
+            allow_debug_on_mainnet = (
+                os.getenv("ALLOW_DEBUG_ON_MAINNET", "false").lower() == "true"
+            )
+
+            if not is_testnet and not allow_debug_on_mainnet:
+                bt.logging.error(
+                    f"Remote debugging endpoint blocked: Not running on testnet (chain: {chain_endpoint})"
+                )
                 return {
                     "error": "Not allowed on mainnet",
                     "message": "This endpoint is only available when validator is running on testnet",
                     "current_chain": str(chain_endpoint),
                 }
+
+            if not is_testnet and allow_debug_on_mainnet:
+                bt.logging.warning(
+                    "⚠️  DEBUG API ENABLED ON MAINNET (ALLOW_DEBUG_ON_MAINNET=true) - USE WITH EXTREME CAUTION!"
+                )
 
             bt.logging.info(f"Testnet check passed: {chain_endpoint}")
 
@@ -162,7 +210,9 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
 
             # Trigger scoring - THIS IS WHERE YOUR BREAKPOINTS WILL HIT
             bt.logging.info("***** Starting manual scoring round *****")
-            rewards = await get_rewards(validator, miner_uids, master_repositories, programming_languages)
+            rewards = await get_rewards(
+                validator, miner_uids, master_repositories, programming_languages
+            )
 
             # Format results - ensure all values are JSON serializable
             result = {
@@ -170,11 +220,18 @@ def create_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
                 "uids_scored": [int(uid) for uid in miner_uids],
                 "total_uids": len(miner_uids),
                 "total_reward_sum": float(np.sum(rewards)) if len(rewards) > 0 else 0.0,
-                "non_zero_rewards": int(np.count_nonzero(rewards)) if len(rewards) > 0 else 0,
-                "rewards": {str(int(uid)): float(reward) for uid, reward in zip(miner_uids, rewards)},
+                "non_zero_rewards": int(np.count_nonzero(rewards))
+                if len(rewards) > 0
+                else 0,
+                "rewards": {
+                    str(int(uid)): float(reward)
+                    for uid, reward in zip(miner_uids, rewards)
+                },
             }
 
-            bt.logging.info(f"Scoring complete! Total rewards: {result['total_reward_sum']:.2f}")
+            bt.logging.info(
+                f"Scoring complete! Total rewards: {result['total_reward_sum']:.2f}"
+            )
             return result
 
         except Exception as e:
@@ -203,7 +260,9 @@ def start_debug_api(validator: "BaseValidatorNeuron", port: int = 8099):
     bt.logging.info("=" * 70)
     bt.logging.info(f"API endpoint: http://0.0.0.0:{port}")
     bt.logging.info(f"Health check: curl http://localhost:{port}/health")
-    bt.logging.info(f"Trigger scoring: curl -X POST http://localhost:{port}/trigger_scoring")
+    bt.logging.info(
+        f"Trigger scoring: curl -X POST http://localhost:{port}/trigger_scoring"
+    )
     bt.logging.info(f"API docs: http://localhost:{port}/docs")
     bt.logging.info("=" * 70)
 
