@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
 
 import bittensor as bt
@@ -119,14 +120,21 @@ def _detect_tagline(body: str, merged_at, last_edited_at) -> bool:
 
 
 def _build_pull_request(
-    repo_full_name: str, pr_number: int, token: str, pr_data: Dict
+    repo_full_name: str,
+    pr_number: int,
+    token: str,
+    pr_data: Dict,
+    assume_merged: bool = False,
 ) -> PullRequest:
     """Create PullRequest dataclass from GitHub REST payload."""
     merged_at_raw = pr_data.get("merged_at")
-    if not merged_at_raw:
-        raise ValueError("PR is not merged; only merged PRs are scored.")
+    # If not merged, assume current time so we can score pre-merge PRs.
+    merged_at_dt = (
+        parse_github_timestamp(merged_at_raw)
+        if merged_at_raw
+        else datetime.now(timezone.utc)
+    )
 
-    merged_at = parse_github_timestamp(merged_at_raw)
     created_at = parse_github_timestamp(pr_data["created_at"])
     last_edited_at = (
         parse_github_timestamp(pr_data["updated_at"])
@@ -135,7 +143,7 @@ def _build_pull_request(
     )
     description = pr_data.get("body", "") or ""
 
-    gittensor_tagged = _detect_tagline(description, merged_at, last_edited_at)
+    gittensor_tagged = _detect_tagline(description, merged_at_dt, last_edited_at)
 
     pr = PullRequest(
         number=pr_number,
@@ -145,7 +153,7 @@ def _build_pull_request(
         github_id=str(pr_data.get("user", {}).get("id", "")),
         title=pr_data.get("title", ""),
         author_login=pr_data.get("user", {}).get("login", ""),
-        merged_at=merged_at,
+        merged_at=merged_at_dt,
         created_at=created_at,
         additions=pr_data.get("additions", 0),
         deletions=pr_data.get("deletions", 0),
@@ -208,6 +216,8 @@ def score_pr():
     pr_number = data.get("pr_number")
     token = data.get("github_token") or data.get("token")
     total_open_prs = data.get("total_open_prs", 0)
+    # Default to True so pre-merge scoring works out of the box.
+    assume_merged = bool(data.get("assume_merged", True))
 
     if not repo_full_name or not pr_number or not token:
         return _error("repo_full_name, pr_number, and github_token are required.", 400)
@@ -227,7 +237,9 @@ def score_pr():
         return jsonify(err[0]), err[1]
 
     try:
-        pr = _build_pull_request(repo_full_name, pr_number, token, pr_data)
+        pr = _build_pull_request(
+            repo_full_name, pr_number, token, pr_data, assume_merged=assume_merged
+        )
     except ValueError as exc:
         return _error(str(exc), 400)
 

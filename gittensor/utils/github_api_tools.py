@@ -27,86 +27,103 @@ def branch_matches_pattern(branch_name: str, patterns: List[str]) -> bool:
 
 
 def make_headers(token: str):
-    '''
+    """
     helper function for formatting headers for requests
-    '''
-    return {'Authorization': f'token {token}', 'Accept': 'application/vnd.github.v3+json'}
+    """
+    return {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
 
 
 def get_github_username(token: str) -> Optional[str]:
-    '''
+    """
     Get username using token
     Args:
         token (str): Github pat
     Returns:
         username: Str or None if PAT is invalid or something went wrong
-    '''
+    """
     headers = make_headers(token)
     try:
-        response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=10)
+        response = requests.get(
+            f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=10
+        )
         if response.status_code == 200:
-            return response.json().get('login', None)
+            return response.json().get("login", None)
     except Exception as e:
         bt.logging.warning(f"Could not fetch GitHub username: {e}")
     return None
 
 
 def get_github_id(token: str) -> Optional[str]:
-    '''
+    """
     Get id using token
     Args:
         token (str): Github pat
     Returns:
         user_id: Str or None if PAT is invalid or something went wrong
-    '''
+    """
     headers = make_headers(token)
 
     # Retry logic for timeout issues
     for attempt in range(3):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
+            response = requests.get(
+                f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30
+            )
             if response.status_code == 200:
-                user_id = response.json().get('id', None)
+                user_id = response.json().get("id", None)
                 if user_id:
                     return str(user_id)  # Ensure it's returned as string
         except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub id (attempt {attempt + 1}/3): {e}")
+            bt.logging.warning(
+                f"Could not fetch GitHub id (attempt {attempt + 1}/3): {e}"
+            )
             if attempt < 2:  # Don't sleep on last attempt
                 time.sleep(2)
     return None
 
 
 def get_github_account_age_days(token: str) -> Optional[int]:
-    '''
+    """
     Get GitHub account age in days
     Args:
         token (str): Github pat
     Returns:
         age_days: Int, number of days since account creation, or None if PAT is invalid or something went wrong
-    '''
+    """
     headers = make_headers(token)
 
     # Retry logic for timeout issues
     for attempt in range(3):
         try:
-            response = requests.get(f'{BASE_GITHUB_API_URL}/user', headers=headers, timeout=30)
+            response = requests.get(
+                f"{BASE_GITHUB_API_URL}/user", headers=headers, timeout=30
+            )
             if response.status_code == 200:
                 user_data = response.json()
-                created_at = user_data.get('created_at')
+                created_at = user_data.get("created_at")
                 if created_at:
-                    created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+                    created_dt = datetime.fromisoformat(created_at.rstrip("Z")).replace(
+                        tzinfo=timezone.utc
+                    )
                     now_dt = datetime.now(timezone.utc)
                     age_days = (now_dt - created_dt).days
                     return age_days
         except Exception as e:
-            bt.logging.warning(f"Could not fetch GitHub account age (attempt {attempt + 1}/3): {e}")
+            bt.logging.warning(
+                f"Could not fetch GitHub account age (attempt {attempt + 1}/3): {e}"
+            )
             if attempt < 2:  # Don't sleep on last attempt
                 time.sleep(2)
     return None
 
 
-def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -> Optional[List[FileChange]]:
-    '''
+def get_pull_request_file_changes(
+    repository: str, pr_number: int, token: str
+) -> Optional[List[FileChange]]:
+    """
     Get the diff for a specific PR by repository name and PR number
     Args:
         repository (str): Repository in format 'owner/repo'
@@ -114,16 +131,21 @@ def get_pull_request_file_changes(repository: str, pr_number: int, token: str) -
         token (str): Github pat
     Returns:
         List[FileChanges]: List object with file changes or None if error
-    '''
+    """
     headers = make_headers(token)
 
     try:
         response = requests.get(
-            f'{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files', headers=headers, timeout=15
+            f"{BASE_GITHUB_API_URL}/repos/{repository}/pulls/{pr_number}/files",
+            headers=headers,
+            timeout=15,
         )
         if response.status_code == 200:
             file_diffs = response.json()
-            return [FileChange.from_github_response(pr_number, repository, file_diff) for file_diff in file_diffs]
+            return [
+                FileChange.from_github_response(pr_number, repository, file_diff)
+                for file_diff in file_diffs
+            ]
 
         return []
 
@@ -158,9 +180,11 @@ def get_user_merged_prs_graphql(
 
     if not user_id or user_id == "None":
         bt.logging.error("Invalid user_id provided to get_user_merged_prs_graphql")
-        return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
+        return PRCountResult(
+            valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0
+        )
 
-    headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     # Calculate date filter
     date_filter = datetime.now(timezone.utc) - timedelta(days=MERGED_PR_LOOKBACK_DAYS)
@@ -248,7 +272,9 @@ def get_user_merged_prs_graphql(
 
     # Build list of active repositories (those without an inactiveAt timestamp)
     active_repositories = [
-        repo_full_name for repo_full_name, metadata in master_repositories.items() if metadata.get("inactiveAt") is None
+        repo_full_name
+        for repo_full_name, metadata in master_repositories.items()
+        if metadata.get("inactiveAt") is None
     ]
 
     try:
@@ -264,14 +290,18 @@ def get_user_merged_prs_graphql(
             for attempt in range(3):
                 try:
                     response = requests.post(
-                        f'{BASE_GITHUB_API_URL}/graphql',
+                        f"{BASE_GITHUB_API_URL}/graphql",
                         headers=headers,
                         json={"query": query, "variables": variables},
                         timeout=15,
                     )
 
                     # Success or non-retryable error
-                    if response.status_code == 200 or response.status_code not in [502, 503, 504]:
+                    if response.status_code == 200 or response.status_code not in [
+                        502,
+                        503,
+                        504,
+                    ]:
                         break
 
                     # Retryable error - log and retry
@@ -292,7 +322,9 @@ def get_user_merged_prs_graphql(
                         )
                         time.sleep(15)
                     else:
-                        bt.logging.error(f"GraphQL request failed after 3 attempts: {e}")
+                        bt.logging.error(
+                            f"GraphQL request failed after 3 attempts: {e}"
+                        )
                         return PRCountResult(
                             valid_prs=all_valid_prs,
                             open_pr_count=open_pr_count,
@@ -308,65 +340,74 @@ def get_user_merged_prs_graphql(
 
             data = response.json()
 
-            if 'errors' in data:
+            if "errors" in data:
                 bt.logging.error(f"GraphQL errors: {data['errors']}")
                 break
 
             # Extract user data from node query
-            user_data = data.get('data', {}).get('node')
+            user_data = data.get("data", {}).get("node")
 
             if not user_data:
                 bt.logging.warning("User not found or no pull requests")
                 break
 
-            pr_data = user_data.get('pullRequests', {})
-            prs = pr_data.get('nodes', [])
-            page_info = pr_data.get('pageInfo', {})
+            pr_data = user_data.get("pullRequests", {})
+            prs = pr_data.get("nodes", [])
+            page_info = pr_data.get("pageInfo", {})
 
             # Process PRs from this page
             for pr_raw in prs:
                 repository_full_name = f"{pr_raw['repository']['owner']['login']}/{pr_raw['repository']['name']}"
-                pr_state = pr_raw['state']
+                pr_state = pr_raw["state"]
 
-                # Check if it's an open PR and count it
-                if pr_state == 'OPEN':
-                    # Check if in tracked repositories
-                    if repository_full_name in active_repositories:
-                        open_pr_count += 1
-                    continue  # Skip further processing for open PRs
-
-                # Handle CLOSED (not merged) PRs - count if within lookback period
-                if pr_state == 'CLOSED' and not pr_raw['mergedAt']:
-                    if pr_raw.get('closedAt'):
-                        closed_dt = datetime.fromisoformat(pr_raw['closedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
-                        if closed_dt >= date_filter and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE and repository_full_name in active_repositories:
-                            closed_pr_count += 1
-                    continue  # Skip further processing for closed PRs
-
-                # Skip if not a merged pr
-                if not pr_raw['mergedAt']:
-                    continue
-
-                # Filter by master_repositories
+                # Filter by master_repositories first
                 if repository_full_name not in master_repositories.keys():
                     bt.logging.debug(
                         f"Skipping PR #{pr_raw['number']} in {repository_full_name} - ineligible repo"
                     )
                     continue
 
+                # If mergedAt missing (open or closed without merge), synthesize mergedAt = now so scoring can run
+                if not pr_raw.get("mergedAt"):
+                    pr_raw = dict(pr_raw)
+                    pr_raw["mergedAt"] = datetime.now(timezone.utc).isoformat()
+
+                # Track open PRs count for metrics
+                if pr_state == "OPEN":
+                    open_pr_count += 1
+
+                # Handle CLOSED (not merged) PRs - count if within lookback period
+                if pr_state == "CLOSED" and pr_raw.get("closedAt"):
+                    closed_dt = datetime.fromisoformat(
+                        pr_raw["closedAt"].rstrip("Z")
+                    ).replace(tzinfo=timezone.utc)
+                    if (
+                        closed_dt >= date_filter
+                        and closed_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE
+                    ):
+                        closed_pr_count += 1
+
                 # Parse merge date and filter by time window
-                merged_dt = datetime.fromisoformat(pr_raw['mergedAt'].rstrip("Z")).replace(tzinfo=timezone.utc)
+                merged_dt = datetime.fromisoformat(
+                    pr_raw["mergedAt"].rstrip("Z")
+                ).replace(tzinfo=timezone.utc)
                 if merged_dt < date_filter:
                     # Skip PRs merged before lookback window
-                    bt.logging.debug(f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window")
+                    bt.logging.debug(
+                        f"Skipping PR #{pr_raw['number']} in {repository_full_name} - merged before {MERGED_PR_LOOKBACK_DAYS} day lookback window"
+                    )
                     continue
 
                 # Skip if PR was merged by the same person who created it (self-merge) AND there's no approvals from a differing party
-                if pr_raw['mergedBy'] and pr_raw['author']['login'] == pr_raw['mergedBy']['login']:
+                if (
+                    pr_raw["mergedBy"]
+                    and pr_raw["author"]["login"] == pr_raw["mergedBy"]["login"]
+                ):
                     # Check if there are any approvals from users other than the author
-                    reviews = pr_raw.get('reviews', {}).get('nodes', [])
+                    reviews = pr_raw.get("reviews", {}).get("nodes", [])
                     has_external_approval = any(
-                        review.get('author') and review['author']['login'] != pr_raw['author']['login']
+                        review.get("author")
+                        and review["author"]["login"] != pr_raw["author"]["login"]
                         for review in reviews
                     )
 
@@ -378,14 +419,18 @@ def get_user_merged_prs_graphql(
 
                 # Skip if PR was not merged to an acceptable branch (default or additional)
                 default_branch = (
-                    pr_raw['repository']['defaultBranchRef']['name']
-                    if pr_raw['repository']['defaultBranchRef']
-                    else 'main'
+                    pr_raw["repository"]["defaultBranchRef"]["name"]
+                    if pr_raw["repository"]["defaultBranchRef"]
+                    else "main"
                 )
-                base_ref = pr_raw['baseRefName']
-                head_ref = pr_raw.get('headRefName', '')  # Source branch (where PR is coming FROM)
+                base_ref = pr_raw["baseRefName"]
+                head_ref = pr_raw.get(
+                    "headRefName", ""
+                )  # Source branch (where PR is coming FROM)
                 repo_metadata = master_repositories.get(repository_full_name, {})
-                additional_branches = repo_metadata.get('additional_acceptable_branches', [])
+                additional_branches = repo_metadata.get(
+                    "additional_acceptable_branches", []
+                )
 
                 # Build list of all acceptable branches (default + additional)
                 acceptable_branches = [default_branch] + additional_branches
@@ -415,7 +460,9 @@ def get_user_merged_prs_graphql(
                 inactive_at = repo_metadata.get("inactiveAt")
                 # if repo is inactive
                 if inactive_at is not None:
-                    inactive_dt = datetime.fromisoformat(inactive_at.rstrip("Z")).replace(tzinfo=timezone.utc)
+                    inactive_dt = datetime.fromisoformat(
+                        inactive_at.rstrip("Z")
+                    ).replace(tzinfo=timezone.utc)
                     # Skip PR if it was merged at or after the repo became inactive
                     if merged_dt >= inactive_dt:
                         bt.logging.debug(
@@ -423,7 +470,9 @@ def get_user_merged_prs_graphql(
                         )
                         continue
 
-                bt.logging.info(f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'")
+                bt.logging.info(
+                    f"Accepting PR #{pr_raw['number']} in {repository_full_name} - merged to '{base_ref}'"
+                )
                 # Increment merged_pr_count if merged after MERGE_SUCCESS_RATIO_APPLICATION_DATE
                 if merged_dt > MERGE_SUCCESS_RATIO_APPLICATION_DATE:
                     merged_pr_count += 1
@@ -431,10 +480,10 @@ def get_user_merged_prs_graphql(
                 all_valid_prs.append(pr_raw)
 
             # Check if we should continue pagination
-            if not page_info.get('hasNextPage') or len(prs) == 0:
+            if not page_info.get("hasNextPage") or len(prs) == 0:
                 break
 
-            cursor = page_info.get('endCursor')
+            cursor = page_info.get("endCursor")
 
         bt.logging.info(
             f"Found {len(all_valid_prs)} valid merged PRs, {open_pr_count} open PRs, "
@@ -449,4 +498,6 @@ def get_user_merged_prs_graphql(
 
     except Exception as e:
         bt.logging.error(f"Error fetching PRs via GraphQL for user: {e}")
-        return PRCountResult(valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0)
+        return PRCountResult(
+            valid_prs=[], open_pr_count=0, merged_pr_count=0, closed_pr_count=0
+        )

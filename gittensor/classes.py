@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import DefaultDict, Dict, List, Optional, Set
 from math import prod
+from typing import DefaultDict, Dict, List, Optional, Set
 
 import bittensor as bt
 
@@ -12,7 +12,7 @@ from gittensor.constants import (
     TEST_FILE_CONTRIBUTION_WEIGHT,
 )
 
-GITHUB_DOMAIN = 'https://github.com/'
+GITHUB_DOMAIN = "https://github.com/"
 
 
 @dataclass
@@ -21,7 +21,9 @@ class PRCountResult:
 
     valid_prs: List[DefaultDict]
     open_pr_count: int
-    merged_pr_count: int  # Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    merged_pr_count: (
+        int  # Count of merged PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
+    )
     closed_pr_count: int  # Count of closed (not merged) PRs after MERGE_SUCCESS_RATIO_APPLICATION_DATE
 
 
@@ -80,17 +82,19 @@ class FileChange:
         return "test" in self.filename.lower()
 
     @classmethod
-    def from_github_response(cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict) -> 'FileChange':
+    def from_github_response(
+        cls, pr_number: int, repository_full_name: str, file_diff: DefaultDict
+    ) -> "FileChange":
         """Create FileChange from GitHub API response"""
         return cls(
             pr_number=pr_number,
             repository_full_name=repository_full_name,
-            filename=file_diff['filename'],
-            changes=file_diff['changes'],
-            additions=file_diff['additions'],
-            deletions=file_diff['deletions'],
-            status=file_diff['status'],
-            patch=file_diff.get('patch'),
+            filename=file_diff["filename"],
+            changes=file_diff["changes"],
+            additions=file_diff["additions"],
+            deletions=file_diff["deletions"],
+            status=file_diff["status"],
+            patch=file_diff.get("patch"),
         )
 
 
@@ -121,7 +125,7 @@ class PullRequest:
     author_login: str
     merged_at: datetime
     created_at: datetime
-    
+
     # Score fields
     repo_weight_multiplier: float = 1.0
     base_score: float = 0.0
@@ -137,7 +141,7 @@ class PullRequest:
     additions: int = 0
     deletions: int = 0
     commits: int = 0
-    total_lines_scored: int = 0    
+    total_lines_scored: int = 0
     gittensor_tagged: bool = False
     merged_by_login: Optional[str] = None
     file_changes: Optional[List[FileChange]] = None
@@ -149,7 +153,9 @@ class PullRequest:
         """Set the file changes for this pull request"""
         self.file_changes = file_changes
 
-    def calculate_score_from_file_changes(self, programming_languages: Dict[str, float]) -> float:
+    def calculate_score_from_file_changes(
+        self, programming_languages: Dict[str, float]
+    ) -> float:
         """Calculate the score for a single PR based on its file changes."""
         # Import here to avoid circular import
         from gittensor.validator.utils.spam_detection import count_non_scoreable_lines
@@ -160,16 +166,24 @@ class PullRequest:
         pr_score = 0.0
 
         total_files_changed = len(self.file_changes)
-        bt.logging.info(f"\nScoring {total_files_changed} file changes for PR #{self.number}")
+        bt.logging.info(
+            f"\nScoring {total_files_changed} file changes for PR #{self.number}"
+        )
 
         for n, file in enumerate(self.file_changes, start=1):
-            language_weight = programming_languages.get(file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT)
+            language_weight = programming_languages.get(
+                file.file_extension, DEFAULT_PROGRAMMING_LANGUAGE_WEIGHT
+            )
 
             total_changes_to_score = file.changes
             if file.file_extension in MITIGATED_EXTENSIONS:
-                total_changes_to_score = min(file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT)
+                total_changes_to_score = min(
+                    file.changes, MAX_LINES_SCORED_FOR_MITIGATED_EXT
+                )
 
-            non_scoreable_lines = count_non_scoreable_lines(file.patch, total_changes_to_score, file.file_extension)
+            non_scoreable_lines = count_non_scoreable_lines(
+                file.patch, total_changes_to_score, file.file_extension
+            )
             scored_changes = max(0, total_changes_to_score - non_scoreable_lines)
 
             self.total_lines_scored += scored_changes
@@ -177,12 +191,14 @@ class PullRequest:
 
             file_score = language_weight * file_weight * scored_changes
 
-            bt.logging.info(f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}")
+            bt.logging.info(
+                f"   -  [{n}/{total_files_changed}] - {file.short_name} | scored {scored_changes} / {file.changes} lines | score: {file_score:.2f}"
+            )
             pr_score += file_score
 
         bt.logging.info(f"Base PR score from file changes: {pr_score:.2f}")
         return pr_score
-    
+
     def calculate_final_earned_score(self) -> float:
         """Combine base score with all multipliers."""
         multipliers = {
@@ -205,37 +221,50 @@ class PullRequest:
         return self.earned_score
 
     @classmethod
-    def from_graphql_response(cls, pr_data: dict, uid: int, hotkey: str, github_id: str) -> 'PullRequest':
+    def from_graphql_response(
+        cls, pr_data: dict, uid: int, hotkey: str, github_id: str
+    ) -> "PullRequest":
         """Create PullRequest from GraphQL API response"""
         # Import here to avoid circular dependency
         from gittensor.constants import PR_TAGLINE
         from gittensor.validator.utils.datetime_utils import parse_github_timestamp
 
-        repo_data = pr_data['repository']
+        repo_data = pr_data["repository"]
         repository_full_name = f"{repo_data['owner']['login']}/{repo_data['name']}"
 
-        raw_issues = pr_data['closingIssuesReferences']['nodes']
+        raw_issues = pr_data["closingIssuesReferences"]["nodes"]
         issues = []
         for issue in raw_issues:
             # Only include issues that are actually closed (both closedAt timestamp and CLOSED state)
-            if issue['closedAt'] and issue.get('state') == 'CLOSED':
+            if issue["closedAt"] and issue.get("state") == "CLOSED":
                 issues.append(
                     Issue(
-                        number=issue['number'],
-                        pr_number=pr_data['number'],
+                        number=issue["number"],
+                        pr_number=pr_data["number"],
                         repository_full_name=repository_full_name,
-                        title=issue['title'],
-                        created_at=parse_github_timestamp(issue['createdAt']),
-                        closed_at=parse_github_timestamp(issue['closedAt']),
-                        author_login=issue.get('author', {}).get('login') if issue.get('author') else None,
-                        state=issue.get('state'),
+                        title=issue["title"],
+                        created_at=parse_github_timestamp(issue["createdAt"]),
+                        closed_at=parse_github_timestamp(issue["closedAt"]),
+                        author_login=issue.get("author", {}).get("login")
+                        if issue.get("author")
+                        else None,
+                        state=issue.get("state"),
                     )
                 )
 
         # Extract description and check for Gittensor tagline
-        description = pr_data.get('bodyText', '')
-        last_edited_at = parse_github_timestamp(pr_data.get('lastEditedAt')) if pr_data.get('lastEditedAt') else None
-        merged_at = parse_github_timestamp(pr_data['mergedAt'])
+        description = pr_data.get("bodyText", "")
+        last_edited_at = (
+            parse_github_timestamp(pr_data.get("lastEditedAt"))
+            if pr_data.get("lastEditedAt")
+            else None
+        )
+        merged_at_raw = pr_data.get("mergedAt")
+        merged_at = (
+            parse_github_timestamp(merged_at_raw)
+            if merged_at_raw
+            else parse_github_timestamp(pr_data["createdAt"])
+        )
 
         # Check if PR has Gittensor tagline and wasn't edited after merge
         gittensor_tagged = False
@@ -243,7 +272,7 @@ class PullRequest:
             # Get the last 100 characters (with cushion) and trim whitespace
             description_end = description[-100:].strip()
             # Check if it ends with the tagline (case-insensitive, lenient with trailing punctuation)
-            description_end_cleaned = description_end.rstrip('.,!?;: \t\n')
+            description_end_cleaned = description_end.rstrip(".,!?;: \t\n")
             if description_end_cleaned.lower().endswith(PR_TAGLINE.lower()):
                 # Only set tagged to True if PR was NOT edited after being merged
                 # (to prevent miners from editing after merge to add the tagline)
@@ -256,19 +285,21 @@ class PullRequest:
                     )
 
         return cls(
-            number=pr_data['number'],
+            number=pr_data["number"],
             repository_full_name=repository_full_name,
             uid=uid,
             hotkey=hotkey,
             github_id=github_id,
-            title=pr_data['title'],
-            author_login=pr_data['author']['login'],
+            title=pr_data["title"],
+            author_login=pr_data["author"]["login"],
             merged_at=merged_at,
-            created_at=parse_github_timestamp(pr_data['createdAt']),
-            additions=pr_data['additions'],
-            deletions=pr_data['deletions'],
-            commits=pr_data.get('commits', {}).get('totalCount', 0),
-            merged_by_login=pr_data['mergedBy']['login'] if pr_data.get('mergedBy') else None,
+            created_at=parse_github_timestamp(pr_data["createdAt"]),
+            additions=pr_data["additions"],
+            deletions=pr_data["deletions"],
+            commits=pr_data.get("commits", {}).get("totalCount", 0),
+            merged_by_login=pr_data["mergedBy"]["login"]
+            if pr_data.get("mergedBy")
+            else None,
             issues=issues,
             description=description,
             last_edited_at=last_edited_at,
@@ -280,14 +311,16 @@ class PullRequest:
 class MinerEvaluation:
     uid: int
     hotkey: str
-    github_id: Optional[str] = '0'  # will be 0 if miner failed
+    github_id: Optional[str] = "0"  # will be 0 if miner failed
     github_pat: Optional[str] = None
     base_total_score: float = 0.0
     total_score: float = 0.0
     total_lines_changed: int = 0
     total_open_prs: int = 0
     total_closed_prs: int = 0  # Total PRs closed within MERGED_PR_LOOKBACK_DAYS
-    total_merged_prs: int = 0  # Total PRs merged within MERGED_PR_LOOKBACK_DAYS (len of valid_prs)
+    total_merged_prs: int = (
+        0  # Total PRs merged within MERGED_PR_LOOKBACK_DAYS (len of valid_prs)
+    )
     unique_repos_count: int = 0
     failed_reason: Optional[str] = None
     evaluation_timestamp: Optional[datetime] = None
